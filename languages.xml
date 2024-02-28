@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+  <books version="1">
+      <book>
+          <bookName>离散数学</bookName>
+          <bookPrice>120</bookPrice>
+      </book>
+      <book>
+          <bookName>人月神话</bookName>
+          <bookPrice>75</bookPrice>
+      </book>
+  </books>
