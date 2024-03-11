@@ -2,8 +2,8 @@ package cbz
 
 import (
 	"archive/zip"
-	"comicInfo/log"
 	"comicInfo/xml"
+	"errors"
 	"fmt"
 	"github.com/xuri/excelize/v2"
 	"io"
@@ -55,38 +55,33 @@ type dirNames struct {
 	ChapterInfo []*xml.ComicInfo //章节信息或者卷信息
 }
 
-func GetInfo() bool {
+func GetInfo() error {
 	// 打开信息excel
 	f, err := excelize.OpenFile(excelName)
 	if err != nil {
-		log.Logger.Println("打开书籍及目录信息失败，请确认文件名")
-		return false
+		return errors.New("打开书籍及目录信息失败，请确认文件名")
 	}
 
 	rows, err := f.GetRows("书籍信息")
 	if err != nil {
-		log.Logger.Println("获取书籍信息内容失败", err)
-		return false
+		return errors.New("获取书籍信息内容失败,失败原因" + err.Error())
 	}
 	nameList := make([]*dirNames, len(rows)-1)
 	for i, row := range rows {
 		if i == 0 {
 			continue
 		}
-		log.Logger.Printf("开始获取 %s 书籍信息\r\n", row[title])
-		fmt.Printf("开始获取 %s 书籍信息\r\n", row[title])
-		if !checkRequired(row, i, false) {
-			log.Logger.Println("书籍必填信息检查未通过，请检查信息")
-			return false
+
+		if e := checkRequired(row, i, false); e != nil {
+			return errors.New(fmt.Sprintf("第%d行书籍必填信息检查未通过，请检查信息:%s", i, e.Error()))
 		}
+		fmt.Printf("开始获取 %s 书籍信息\r\n", row[title])
 		if row[target] == row[title] {
-			log.Logger.Println("因为需要在原地创建新文件夹,源文件夹和新文件夹名字不能相同，请检查信息")
-			return false
+			return errors.New("因为需要在原地创建新文件夹,源文件夹和新文件夹名字不能相同，请检查信息")
 		}
 		info, err := os.Stat(row[target])
 		if err != nil || !info.IsDir() {
-			log.Logger.Printf("%s 不是一个有效路径或者文件夹", row[title])
-			return false
+			return errors.New(fmt.Sprintf("%s 不是一个有效路径或者文件夹", row[title]))
 		}
 		//初始化书籍信息
 		nameList[i-1] = &dirNames{
@@ -102,11 +97,10 @@ func GetInfo() bool {
 			},
 		}
 
-		log.Logger.Printf("开始获取 %s 章节信息\r\n", row[title])
 		fmt.Printf("开始获取 %s 章节信息\r\n", row[title])
 		chapters, err := f.GetRows(row[title])
 		if err != nil {
-			log.Logger.Printf("%s 的章节信息获取失败", row[title])
+			return errors.New(fmt.Sprintf("%s 的章节信息获取失败", row[title]))
 		}
 
 		nameList[i-1].SonDirs = make([]string, len(chapters)-1)
@@ -115,14 +109,12 @@ func GetInfo() bool {
 			if j == 0 {
 				continue
 			}
-			if !checkRequired(chapter, i, true) {
-				log.Logger.Println("章节必填信息检查未通过，请检查信息")
-				return false
+			if e := checkRequired(chapter, i, true); e != nil {
+				return errors.New(fmt.Sprintf("%s的第%d章节必填信息检查未通过，请检查信息：%s", row[title], i, e.Error()))
 			}
 			info, err = os.Stat(row[target] + "/" + chapter[target])
 			if err != nil || !info.IsDir() {
-				log.Logger.Printf("%s 不是一个有效路径或者文件夹:%s", chapter[target], err)
-				return false
+				return errors.New(fmt.Sprintf("%s 不是一个有效路径或者文件夹:%s", chapter[target], err))
 			}
 			nameList[i-1].SonDirs[j-1] = chapter[target]
 			chapterSummary, webUrl := "", ""
@@ -142,21 +134,19 @@ func GetInfo() bool {
 				Web:       webUrl,
 				Publisher: row[publisher],
 			}
-			log.Logger.Printf("获取 %s 第 %d 章 %s 信息\r\n", row[title], j, chapter[title])
 			fmt.Printf("获取 %s 第 %d 章 %s 信息\r\n", row[title], j, chapter[title])
 		}
-		log.Logger.Println("信息获取完毕")
+		//log.Logger.Println("信息获取完毕")
 	}
 
 	// 执行操作
 	for _, names := range nameList {
 		//创建
 
-		log.Logger.Println("创建漫画文件夹")
+		//log.Logger.Println("创建漫画文件夹")
 		err := os.Mkdir(names.BookInfo.Title, 0777)
 		if err != nil {
-			log.Logger.Printf("%s 创建文件夹失败:%s", names.BookInfo.Title, err)
-			return false
+			return errors.New(fmt.Sprintf("%s 创建文件夹失败:%s", names.BookInfo.Title, err))
 		}
 		for i, info := range names.ChapterInfo {
 			oldPath := names.OldName + "/" + names.SonDirs[i]
@@ -167,8 +157,8 @@ func GetInfo() bool {
 			//章节打包
 			err := compressDir(oldPath, newPath)
 			if err != nil {
-				log.Logger.Printf("%s 打包失败 %s", info.Title, err)
-				return false
+				//log.Logger.Printf("%s 打包失败 %s", info.Title, err)
+				return errors.New(fmt.Sprintf("%s 打包失败 %s", info.Title, err))
 			}
 		}
 		//生成书籍xml 暂时不支持书籍的,就不写这个了
@@ -176,7 +166,7 @@ func GetInfo() bool {
 
 		//整书打包
 	}
-	return true
+	return nil
 }
 
 // dir: 需要打包的本地文件夹路径
@@ -224,24 +214,17 @@ func compressDir(dir string, dst string) error {
 	})
 }
 
-func checkRequired(strList []string, i int, isChapter bool) (result bool) {
+func checkRequired(strList []string, i int, isChapter bool) error {
 	if strings.TrimSpace(strList[target]) == "" {
-		log.Logger.Printf("第%d行目标文件夹信息为空\r\n", i+1)
-		result = false
+		return errors.New("第" + strconv.Itoa(i+1) + "行目标文件夹信息为空")
 	} else if strings.TrimSpace(strList[title]) == "" {
-		log.Logger.Printf("第%d行标题信息为空\r\n", i+1)
-		result = false
+		return errors.New("第" + strconv.Itoa(i+1) + "行标题信息为空")
 	} else if !isChapter && strings.TrimSpace(strList[series]) == "" {
-		log.Logger.Printf("第%d行系列信息为空\r\n", i+1)
-		result = false
+		return errors.New("第" + strconv.Itoa(i+1) + "行系列信息为空")
 	} else if !isChapter && strings.TrimSpace(strList[writer]) == "" {
-		log.Logger.Printf("第%d行书籍作者信息为空\r\n", i+1)
-		result = false
+		return errors.New("第" + strconv.Itoa(i+1) + "行书籍作者信息为空")
 	} else if !isChapter && strings.TrimSpace(strList[publisher]) == "" {
-		log.Logger.Printf("第%d行书籍出版社信息为空\r\n", i+1)
-		result = false
-	} else {
-		result = true
+		return errors.New("第" + strconv.Itoa(i+1) + "行书籍出版社信息为空")
 	}
-	return
+	return nil
 }
