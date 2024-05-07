@@ -5,6 +5,7 @@ import (
 	"comicInfo/xml"
 	"errors"
 	"fmt"
+	"github.com/pterm/pterm"
 	"github.com/xuri/excelize/v2"
 	"io"
 	"os"
@@ -67,6 +68,7 @@ func GetInfo() error {
 		return errors.New("获取书籍信息内容失败,失败原因" + err.Error())
 	}
 	nameList := make([]*dirNames, len(rows)-1)
+
 	for i, row := range rows {
 		if i == 0 {
 			continue
@@ -105,7 +107,12 @@ func GetInfo() error {
 
 		nameList[i-1].SonDirs = make([]string, len(chapters)-1)
 		nameList[i-1].ChapterInfo = make([]*xml.ComicInfo, len(chapters)-1)
+
+		// 进度条
+		progressBar1, _ := pterm.DefaultProgressbar.WithTotal(len(chapters)).WithTitle(fmt.Sprintf("正在获取 %s 书籍信息...", row[title])).Start()
+
 		for j, chapter := range chapters {
+			progressBar1.Add(1)
 			if j == 0 {
 				continue
 			}
@@ -136,19 +143,27 @@ func GetInfo() error {
 			}
 			fmt.Printf("获取 %s 第 %d 章 %s 信息\r\n", row[title], j, chapter[title])
 		}
-		//log.Logger.Println("信息获取完毕")
+		_, _ = progressBar1.Stop()
+		fmt.Println(row[title] + "信息获取完毕")
 	}
 
 	// 执行操作
 	for _, names := range nameList {
 		//创建
 
-		//log.Logger.Println("创建漫画文件夹")
+		fmt.Println("创建漫画文件夹")
 		err := os.Mkdir(names.BookInfo.Title, 0777)
 		if err != nil {
 			return errors.New(fmt.Sprintf("%s 创建文件夹失败:%s", names.BookInfo.Title, err))
 		}
+
+		//进度条
+		// 进度条
+		progressBar2, _ := pterm.DefaultProgressbar.WithTotal(len(names.ChapterInfo)).WithTitle(fmt.Sprintf("正在打包 %s...", names.BookInfo.Title)).Start()
+
 		for i, info := range names.ChapterInfo {
+			progressBar2.UpdateTitle(fmt.Sprintf("正在打包第%s话", getNo(i+1)))
+			progressBar2.Add(1)
 			oldPath := names.OldName + "/" + names.SonDirs[i]
 			newPath := names.BookInfo.Title + "/" + info.Title + ".cbz"
 			//创建xml文件
@@ -157,10 +172,11 @@ func GetInfo() error {
 			//章节打包
 			err := compressDir(oldPath, newPath)
 			if err != nil {
-				//log.Logger.Printf("%s 打包失败 %s", info.Title, err)
 				return errors.New(fmt.Sprintf("%s 打包失败 %s", info.Title, err))
 			}
 		}
+		_, _ = progressBar2.Stop()
+		fmt.Println(names.BookInfo.Title + "打包完成")
 		//生成书籍xml 暂时不支持书籍的,就不写这个了
 		// xml.GenerateXML(names.BookInfo.Title, names.BookInfo)
 
@@ -227,4 +243,9 @@ func checkRequired(strList []string, i int, isChapter bool) error {
 		return errors.New("第" + strconv.Itoa(i+1) + "行书籍出版社信息为空")
 	}
 	return nil
+}
+
+func getNo(i int) string {
+	s := "00" + strconv.Itoa(i)
+	return s[len(s)-3:]
 }
